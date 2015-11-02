@@ -1,0 +1,17 @@
+- name: Checking that nginx is installed
+  shell: service nginx status
+  register: zray_nginx_exists
+  ignore_errors: true
+  
+- fail: msg="Nginx is not installed"
+  when: zray_nginx_exists.stderr == 1
+
+- name: Installing php5-fpm
+  apt: name=php5-fpm
+  when: ansible_distribution == 'Ubuntu' or ansible_distribution == 'Debian'
+  
+- set_fact: zray_nginx_conf_parameter="nginx=/etc/nginx/conf.d"
+  when: ansible_distribution == 'Ubuntu' or ansible_distribution == 'Debian'
+  
+- set_fact: zray_nginx_conf_parameter="nginx=/etc/nginx/default.d"
+  when: ansible_distribution == 'CentOS'

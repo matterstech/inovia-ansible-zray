@@ -1,0 +1,38 @@
+- fail: msg="ZRay is not currently supported for MacOSX"
+  when: ansible_distribution == 'MacOSX'
+
+- fail: msg="ZRay for Nginx not currently supported for Ubuntu < 14 or MacOSX"
+  when: ((ansible_distribution == 'Ubuntu' and ansible_distribution_version < '14') or (ansible_distribution == 'MacOSX')) and zray_nginx == true
+
+- name: Copying installer directory
+  copy: src=ZRay-Installer dest=/tmp
+  
+- name: Checking OS
+  shell: sh /tmp/ZRay-Installer/check_os.sh
+  
+- name: Checking php
+  shell: sh /tmp/ZRay-Installer/check_php.sh {{zray_php_path|default('')}}
+  register: zray_php_version
+
+- name: Make sure the dependencies are present (Debian based)
+  apt: name={{item}}
+  with_items:
+    - php5-sqlite
+    - php5-curl
+    - php5-json
+  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+  
+- name: Checking php extensions
+  shell: sh /tmp/ZRay-Installer/check_php_extensions.sh {{zray_php_path|default('')}}
+  
+- include: apache/main.yml
+  when: zray_apache == true
+  
+- include: nginx/main.yml
+  when: zray_nginx == true
+
+- name: Copying zray tarball
+  copy: src="zray-php-101832-php{{zray_php_version.stdout}}-linux-debian7-amd64.tar.gz" dest="/tmp/ZRay-Installer"
+  
+- name: Installing zray
+  shell: "{{zray_php_path|default('php')}} /tmp/ZRay-Installer/install.php /tmp/ZRay-Installer/zray-php-101832-php{{zray_php_version.stdout}}-linux-debian7-amd64.tar.gz {{zray_nginx_conf_parameter|default('')}}"

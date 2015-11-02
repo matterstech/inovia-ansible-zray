@@ -1,0 +1,9 @@
+- name: Enabling mod_rewrite for apache
+  command: "a2enmod {{ item }}"
+  with_items:
+    - rewrite
+  when: ansible_distribution == 'Ubuntu' or ansible_distribution == 'Debian'
+  
+- name: Checking webserver
+  shell: sh /tmp/ZRay-Installer/check_webserver.sh {{zray_php_path|default('')}}
+  when: ansible_distribution != "MacOSX"
