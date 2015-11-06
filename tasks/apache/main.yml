@@ -1,9 +1,11 @@
-- name: Enabling mod_rewrite for apache
-  command: "a2enmod {{ item }}"
-  with_items:
-    - rewrite
-  when: ansible_distribution == 'Ubuntu' or ansible_distribution == 'Debian'
+- name: Enabling mod_rewrite for apache (Debian)
+  apache2_module: state=present name=rewrite
+  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
   
-- name: Checking webserver
-  shell: sh /tmp/ZRay-Installer/check_webserver.sh {{zray_php_path|default('')}}
-  when: ansible_distribution != "MacOSX"
+- name: Checking that webserver is running (Debian)
+  service: name=apache2 state=started
+  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+  
+- name: Checking that webserver is running (RHEL)
+  service: name=httpd state=started
+  when: ansible_distribution == 'CentOS' or ansible_distribution == 'Red Hat Enterprise Linux'

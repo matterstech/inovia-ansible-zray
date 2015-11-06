@@ -10,15 +10,16 @@ function usage($exitCode) {
 }
 
 class Installer {
-    protected $extensionsDir = "";
-    protected $scanDirCli = "";
-    protected $user = - 1;
-    protected $tarfile = "";
-    protected $targetFolder = "/opt/zray";
+    protected $extensionsDir    = "";
+    protected $scanDirCli       = "";
+    protected $user             = - 1;
+    protected $tarfile          = "";
+    protected $targetFolder     = "/opt/zray";
     protected $webServerScanDir = "";
-    protected $webuser = "";
-    protected $isNginx = false;
-    protected $nginxPath = "";
+    protected $webuser          = "www-data";
+    protected $webgroup         = "www-data";
+    protected $isNginx          = false;
+    protected $nginxPath        = "";
 
     /**
      * @brief are we running on Linux?
@@ -73,16 +74,36 @@ class Installer {
      * and exit
      */
     public function validateOS() {
-        if($this->isOSX()) {
+        if ($this->isOSX()) {
             $this->message("OS: OSX");
-        } else if($this->isCentOS()) {
+        }
+        else if($this->isCentOS()) {
             $this->message("OS: CentOS");
-        } else if($this->isRHEL()) {
+        }
+        else if($this->isRHEL()) {
             $this->message("OS: RHEL");
-        } else if($this->isDebian()) {
+        }
+        else if($this->isDebian()) {
             $this->message("OS: Debian Linux");
-        } else {
+        }
+        else {
             $this->error("This OS is not supported");
+        }
+    }
+
+    /**
+     * @brief trying to fetch apache user and group dynamically
+     */
+    public function fetchApacheUserAndGroup()
+    {
+        exec('apachectl -S 2>/dev/null |grep "User:" |sed \'s%User: name="\(.*\)".*%\1%\' | grep -v "User:"', $webUser);
+        exec('apachectl -S 2>/dev/null |grep "Group:" |sed \'s%Group: name="\(.*\)".*%\1%\' | grep -v "Group:"', $webGroup);
+        if (!empty($webUser)) {
+            $this->webuser = $webUser[0];
+        }
+
+        if (!empty($webGroup)) {
+            $this->webgroup = $webGroup[0];
         }
     }
 
@@ -96,7 +117,7 @@ class Installer {
         $this->setIsNginx($isNginx);
         $this->validateOS();
         $this->extensionsDir = ini_get("extension_dir");
-        if($this->isDebian()) {
+        if ($this->isDebian()) {
             $this->scanDirCli = dirname(php_ini_loaded_file()). "/conf.d";
 
             if ($this->getIsNginx()) {
@@ -106,28 +127,56 @@ class Installer {
                 $this->webServerScanDir = str_replace("cli", "apache2", $this->scanDirCli);
             }
 
-        } else {
-            $this->scanDirCli = "/etc/php.d";
+        }
+        else {
+            $this->scanDirCli       = "/etc/php.d";
             $this->webServerScanDir = "/etc/php.d";
         }
 
-        if($this->isDebian()) {
-            $this->webuser = "www-data";
-        } else if($this->isOSX()) {
-            $this->webuser = "_www";
-        } else if($this->isCentOS() || $this->isRHEL()) {
-            $this->webuser = "apache";
-        } else {
-            // Default
-            $this->webuser = "www-data";
+        if ($this->isApache()) {
+            // APACHE
+            if ($this->isDebian()) {
+                $this->webuser  = 'www-data';
+                $this->webgroup = 'www-data';
+
+                $this->fetchApacheUserAndGroup();
+
+            }
+            elseif ($this->isCentOS() || $this->isRHEL()) {
+                $this->webuser  = 'apache';
+                $this->webgroup = 'apache';
+
+                $this->fetchApacheUserAndGroup();
+            }
+            elseif ($this->isOSX()) {
+                $this->webuser = "_www";
+                $this->webgroup = "_www";
+            }
+        }
+        else {
+            // NGINX
+            if ($this->isDebian()) {
+                $this->webuser = "www-data";
+                $this->webgroup = "www-data";
+            }
+            else if($this->isOSX()) {
+                $this->webuser = "_www";
+                $this->webgroup = "_www";
+            }
+            else if($this->isCentOS() || $this->isRHEL()) {
+                $this->webuser  = "nginx";
+                $this->webgroup = "nginx";
+            }
         }
 
         $this->message("WebServer user: {$this->webuser}");
+        $this->message("WebServer group: {$this->webgroup}");
         $this->getUid();
 
-        if($this->isOSX()) {
+        if ($this->isOSX()) {
             $this->targetFolder = "/usr/local/opt/zray";
         }
+
         $this->message("Installation folder: {$this->targetFolder}");
     }
 
@@ -141,7 +190,7 @@ class Installer {
      * @brief is this Installer object initialized properly?
      */
     public function isOk() {
-        return($this->getExtensionsDir()!= null)&&($this->getExtensionsDir()!= "");
+        return ($this->getExtensionsDir()!= null) && ($this->getExtensionsDir()!= "");
     }
 
     /**
@@ -155,7 +204,7 @@ class Installer {
      * @brief return true if the current user is root
      */
     public function isRoot() {
-        return($this->user == 0);
+        return ($this->user == 0);
     }
 
     public function isTarFileExists() {
@@ -178,11 +227,13 @@ class Installer {
      */
     public function sanity() {
         global $argv;
-        if(!$this->isRoot()) {
+
+        if (!$this->isRoot()) {
             $this->error("You must be root for running this script!", 1);
         }
+
         // Check that the tar file exists
-        if(!$this->isTarFileExists()) {
+        if (!$this->isTarFileExists()) {
             $this->error("No such file: $argv[1]", 2);
         }
     }
@@ -192,18 +243,20 @@ class Installer {
      */
     public function installZRayUIConfigFile() {
         if ($this->isApache()) {
-            if($this->isDebian()) {
+            if ($this->isDebian()) {
                 $this->message("cp {$this->targetFolder}/zray-ui.conf /etc/apache2/sites-available");
                 exec("cp {$this->targetFolder}/zray-ui.conf /etc/apache2/sites-available");
-            } else if($this->isCentOS() || $this->isRHEL()) {
-                // Copy ZRay UI conf file to its proper location
+            }
+            else if($this->isCentOS() || $this->isRHEL()) {
                 $this->message("cp {$this->targetFolder}/zray-ui.conf /etc/httpd/conf.d/");
                 exec("cp {$this->targetFolder}/zray-ui.conf /etc/httpd/conf.d/");
-            } else if($this->isOSX()) {
+            }
+            else if($this->isOSX()) {
                 $this->message("ln -sf  {$this->targetFolder}/zray-ui-osx.conf /private/etc/apache2/other/zray-ui-osx.conf");
                 exec("ln -sf  {$this->targetFolder}/zray-ui-osx.conf /private/etc/apache2/other/zray-ui-osx.conf");
             }
-        } else {
+        }
+        else {
             // Nginx
             if ($this->isDebian()) {
                 $content = file_get_contents('/etc/nginx/sites-available/default');
@@ -226,17 +279,19 @@ class Installer {
     public function install() {
         // Check that we can proceed with the installation
         $this->sanity();
-        if(file_exists($this->targetFolder)) {
+
+        if (file_exists($this->targetFolder)) {
             $this->message("Old installation found");
             // rename it
             $backupName = "{$this->targetFolder}." . time();
-            if(!rename($this->targetFolder, $backupName)) {
+            if (!rename($this->targetFolder, $backupName)) {
                 $this->error("failed to backup old installation", 3);
             }
+
             $this->message("Old installation was renamed to " . $backupName);
         }
 
-        if($this->isOSX()) {
+        if ($this->isOSX()) {
             $this->message("OSX: Extracting tar.gz file: " . $this->tarfile);
             $cmd = "tar xfz " . $this->tarfile . " -C /usr/local/opt ";
             exec($cmd, $output, $returnValue);
@@ -244,103 +299,51 @@ class Installer {
                 $this->error("Failed to extract file " . $this->tarfile . " to /usr/local/opt", 4);
             }
 
-        } else {
+        }
+        else {
             $this->message("Extracting tar.gz file: " . $this->tarfile);
             $cmd = "tar xfz " . $this->tarfile . " -C /opt";
             exec($cmd, $output, $returnValue);
-            if($returnValue != 0) {
+            if ($returnValue != 0) {
                 $this->error("Failed to extract file " . $this->tarfile . " to /opt", 4);
             }
         }
 
         $this->installZRayUIConfigFile();
-        if($this->isLinux()) {
-            if($this->isApache()) {
-                if($this->isDebian()) {
 
-                    $this->message("a2ensite zray-ui.conf");
-                    exec("a2ensite zray-ui.conf");
+        if ($this->isLinux()) {
+            $this->message("ln -sf {$this->targetFolder}/lib/zray.so " . $this->extensionsDir . "/zray.so");
+            exec("ln -sf {$this->targetFolder}/lib/zray.so " . $this->extensionsDir . "/zray.so");
 
-                    $this->message("ln -sf {$this->targetFolder}/lib/zray.so " . $this->extensionsDir . "/zray.so");
-                    exec("ln -sf {$this->targetFolder}/lib/zray.so " . $this->extensionsDir . "/zray.so");
+            $this->message("ln -sf {$this->targetFolder}/zray.ini " . $this->webServerScanDir . "/zray.ini");
+            exec("ln -sf {$this->targetFolder}/zray.ini " . $this->webServerScanDir . "/zray.ini");
 
-                    $this->message("ln -sf {$this->targetFolder}/zray.ini " . $this->webServerScanDir . "/zray.ini");
-                    exec("ln -sf {$this->targetFolder}/zray.ini " . $this->webServerScanDir . "/zray.ini");
+            if ($this->isDebian()) {
+                $this->message("a2ensite zray-ui.conf");
+                exec("a2ensite zray-ui.conf");
 
-                    $this->message("ln -sf {$this->targetFolder}/zray.ini " . $this->scanDirCli . "/zray.ini");
-                    exec("ln -sf {$this->targetFolder}/zray.ini " . $this->scanDirCli . "/zray.ini");
-
-                    $this->message("chown -R " . $this->webuser . ":" . $this->webuser . " {$this->targetFolder}");
-                    exec("chown -R " . $this->webuser . ":" . $this->webuser . " {$this->targetFolder}");
-
-                    // Run php -m, this will create all the directory layout
-                    exec("php -m", $phpMOutput);
-
-                } else if($this->isCentOS() || $this->isRHEL()) {
-
-                    $this->message("ln -sf {$this->targetFolder}/lib/zray.so " . $this->extensionsDir . "/zray.so");
-                    exec("ln -sf {$this->targetFolder}/lib/zray.so " . $this->extensionsDir . "/zray.so");
-
-                    $this->message("ln -sf {$this->targetFolder}/zray.ini " . $this->webServerScanDir . "/zray.ini");
-                    exec("ln -sf {$this->targetFolder}/zray.ini " . $this->webServerScanDir . "/zray.ini");
-
-                    $this->message("chown -R " . $this->webuser . ":" . $this->webuser . " {$this->targetFolder}");
-                    exec("chown -R " . $this->webuser . ":" . $this->webuser . " {$this->targetFolder}");
-
-                    // Run php -m, this will create all the directory layout
-                    exec("php -m", $phpMOutput);
-
-                } else {
-                    $this->error("Unknown OS found", 5);
-                }
-            } else {
-                // Nginx
-                if ($this->isDebian()) {
-                    $this->message("ln -sf {$this->targetFolder}/lib/zray.so " . $this->extensionsDir . "/zray.so");
-                    exec("ln -sf {$this->targetFolder}/lib/zray.so " . $this->extensionsDir . "/zray.so");
-
-                    $this->message("ln -sf {$this->targetFolder}/zray.ini " . $this->nginxPath . "/zray.ini");
-                    exec("ln -sf {$this->targetFolder}/zray.ini " . $this->nginxPath . "/zray.ini");
-
-                    $this->message("ln -sf {$this->targetFolder}/zray.ini " . $this->webServerScanDir . "/zray.ini");
-                    exec("ln -sf {$this->targetFolder}/zray.ini " . $this->webServerScanDir . "/zray.ini");
-
-                    $this->message("ln -sf {$this->targetFolder}/zray.ini " . $this->scanDirCli . "/zray.ini");
-                    exec("ln -sf {$this->targetFolder}/zray.ini " . $this->scanDirCli . "/zray.ini");
-
-                    $nginxDefaultDir = '/usr/share/nginx/html';
-                    if (!file_exists($nginxDefaultDir)) {
-                        $nginxDefaultDir = '/usr/share/nginx/www';
-                    }
-
-                    $this->message("ln -sf {$this->targetFolder}/gui/public $nginxDefaultDir/ZendServer ");
-                    exec("ln -sf {$this->targetFolder}/gui/public $nginxDefaultDir/ZendServer");
-
-                    $this->message("chown -R " . $this->webuser . ":" . $this->webuser . " {$this->targetFolder}");
-                    exec("chown -R " . $this->webuser . ":" . $this->webuser . " {$this->targetFolder}");
-
-                    // Run php -m, this will create all the directory layout
-                    exec("php -m", $phpMOutput);
-                }
-                else if ($this->isCentOS() || $this->isRHEL()) {
-                    $this->message("ln -sf {$this->targetFolder}/lib/zray.so " . $this->extensionsDir . "/zray.so");
-                    exec("ln -sf {$this->targetFolder}/lib/zray.so " . $this->extensionsDir . "/zray.so");
-
-                    $this->message("ln -sf {$this->targetFolder}/zray.ini " . $this->webServerScanDir . "/zray.ini");
-                    exec("ln -sf {$this->targetFolder}/zray.ini " . $this->webServerScanDir . "/zray.ini");
-
-                    $this->message("chown -R " . $this->webuser . ":" . $this->webuser . " {$this->targetFolder}");
-                    exec("chown -R " . $this->webuser . ":" . $this->webuser . " {$this->targetFolder}");
-
-                    $this->message("ln -sf {$this->targetFolder}/gui/public /usr/share/nginx/html/ZendServer ");
-                    exec("ln -sf {$this->targetFolder}/gui/public /usr/share/nginx/html/ZendServer");
-
-                    // Run php -m, this will create all the directory layout
-                    exec("php -m", $phpMOutput);
-                }
+                $this->message("ln -sf {$this->targetFolder}/zray.ini " . $this->scanDirCli . "/zray.ini");
+                exec("ln -sf {$this->targetFolder}/zray.ini " . $this->scanDirCli . "/zray.ini");
             }
 
-        } else if($this->isOSX()) {
+            if ($this->getIsNginx()) {
+                $nginxDefaultDir = '/usr/share/nginx/html';
+                if (!file_exists($nginxDefaultDir)) {
+                    $nginxDefaultDir = '/usr/share/nginx/www';
+                }
+
+                $this->message("ln -sf {$this->targetFolder}/zray.ini " . $this->nginxPath . "/zray.ini");
+                exec("ln -sf {$this->targetFolder}/zray.ini " . $this->nginxPath . "/zray.ini");
+
+                $this->message("ln -sf {$this->targetFolder}/gui/public $nginxDefaultDir/ZendServer ");
+                exec("ln -sf {$this->targetFolder}/gui/public $nginxDefaultDir/ZendServer");
+            }
+
+            // Run php -m, this will create all the directory layout
+            exec("php -m", $phpMOutput);
+
+        }
+        else if($this->isOSX()) {
             // Edit php.ini
             if ($this->OSXIsPhpIniNeeded()) {
                 $phpIniLoadedFile = php_ini_loaded_file();
@@ -351,7 +354,8 @@ class Installer {
                 $this->message("Editing php.ini: " . $phpIniLoadedFile);
                 $dataToAdd = "\nzend_extension={$this->targetFolder}/lib/zray.so\nzray.install_dir={$this->targetFolder}\n";
                 file_put_contents($phpIniLoadedFile, $dataToAdd, FILE_APPEND);
-            } else {
+            }
+            else {
                 $this->message("No need to edit php.ini ". php_ini_loaded_file());
             }
 
@@ -361,7 +365,7 @@ class Installer {
             // Finally, run install_name_tool to ensure that libphp5.so is loading the proper
             // libcurl.4.dylib
             $libphp = $this->OSXGetPhpExtPath();
-            if($libphp) {
+            if ($libphp) {
                 $installNameToolCmd = "install_name_tool -change /usr/lib/libcurl.4.dylib {$this->targetFolder}/lib/libcurl.4.dylib $libphp";
                 $this->message($installNameToolCmd);
                 exec($installNameToolCmd);
@@ -398,23 +402,25 @@ class Installer {
      */
     protected function restartWebServer() {
         if ($this->isApache()) {
-            if($this->isOSX()) {
+            if ($this->isOSX()) {
                 // restart php
                 $this->message("/usr/sbin/apachectl restart");
                 exec("/usr/sbin/apachectl restart");
 
-            } else if($this->isCentOS()) {
+            }
+            else if($this->isCentOS() || $this->isRHEL()) {
                 $this->message("systemctl restart httpd");
                 exec("systemctl restart httpd");
 
-            } else {
+            }
+            else {
                 // Last, restart apache
                 $this->message("service apache2 restart");
                 exec("service apache2 restart");
             }
         } else {
             // Nginx
-            if ($this->isCentOS()) {
+            if ($this->isCentOS() || $this->isRHEL()) {
                 $this->message("systemctl restart php-fpm");
                 exec("systemctl restart php-fpm");
 
@@ -441,12 +447,13 @@ class Installer {
      * @brief chown the zray directory
      */
     protected function chownDirectory() {
-        if($this->isOSX()) {
-            $this->message("/usr/sbin/chown -R {$this->webuser}:{$this->webuser} {$this->targetFolder}");
-            exec("/usr/sbin/chown -R {$this->webuser}:{$this->webuser} {$this->targetFolder}");
-        } else {
-            $this->message("chown -R {$this->webuser}:{$this->webuser} {$this->targetFolder}");
-            exec("chown -R {$this->webuser}:{$this->webuser} {$this->targetFolder}");
+        if ($this->isOSX()) {
+            $this->message("/usr/sbin/chown -R {$this->webuser}:{$this->webgroup} {$this->targetFolder}");
+            exec("/usr/sbin/chown -R {$this->webuser}:{$this->webgroup} {$this->targetFolder}");
+        }
+        else {
+            $this->message("chown -R {$this->webuser}:{$this->webgroup} {$this->targetFolder}");
+            exec("chown -R {$this->webuser}:{$this->webgroup} {$this->targetFolder}");
         }
     }
     /**
@@ -553,11 +560,11 @@ if($argc < 2) {
 $isNginx = false;
 $nginxConfig = "";
 
-if($argc > 2) {
+if ($argc > 2) {
     // we have got nginx argument
     $isNginx = true;
     $where = strpos($argv[2], "nginx=");
-    if($where !== FALSE) {
+    if ($where !== FALSE) {
         $nginxConfig = substr($argv[2], $where + 6);
     }
 }
